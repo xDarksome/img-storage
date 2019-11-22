@@ -1,5 +1,5 @@
-use async_std::fs::File;
-use async_std::prelude::*;
+use super::libvips;
+use tokio::{fs::File, prelude::*};
 
 pub(crate) struct Image {
     pub(crate) filename: String,
@@ -31,9 +31,21 @@ impl Image {
         Ok(Self::new(filename, body.to_vec()))
     }
 
-    pub(crate) fn from_base64(filename: String, data: String) -> Result<Self, Error> {
-        let bytes = base64::decode(&data).or_invalid_argument("base64", "failed to decode")?;
+    pub(crate) async fn from_base64(filename: String, data: String) -> Result<Self, Error> {
+        let bytes = tokio_executor::blocking::run(move || base64::decode(&data))
+            .await
+            .or_invalid_argument("base64", "failed to decode")?;
+
         Ok(Self::new(filename, bytes))
+    }
+
+    pub(crate) async fn into_thumbnail(self) -> Result<Self, Error> {
+        let data = self.data;
+        let res = tokio_executor::blocking::run(|| libvips::thumbnail(data))
+            .await
+            .or_internal_err()?;
+
+        Ok(Image::new(self.filename, res))
     }
 
     pub(crate) async fn save(&self) -> Result<(), Error> {
@@ -104,17 +116,19 @@ impl InvalidArgumentError {
 }
 
 pub(crate) enum ErrorCause {
-    IO(async_std::io::Error),
+    IO(std::io::Error),
     Reqwest(reqwest::Error),
     Base64Decode(base64::DecodeError),
+    Libvips(libvips::Error),
 }
 
 impl std::fmt::Display for ErrorCause {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            ErrorCause::IO(err) => write!(f, "{}", err),
-            ErrorCause::Reqwest(err) => write!(f, "{}", err),
-            ErrorCause::Base64Decode(err) => write!(f, "{}", err),
+            ErrorCause::IO(err) => write!(f, "io: {}", err),
+            ErrorCause::Reqwest(err) => write!(f, "reqwest: {}", err),
+            ErrorCause::Base64Decode(err) => write!(f, "base64: {}", err),
+            ErrorCause::Libvips(err) => write!(f, "libvips: {}", err),
         }
     }
 }
@@ -124,8 +138,8 @@ pub(crate) enum ErrorKind {
     Internal,
 }
 
-impl From<async_std::io::Error> for ErrorCause {
-    fn from(err: async_std::io::Error) -> Self {
+impl From<std::io::Error> for ErrorCause {
+    fn from(err: std::io::Error) -> Self {
         Self::IO(err)
     }
 }
@@ -139,6 +153,12 @@ impl From<reqwest::Error> for ErrorCause {
 impl From<base64::DecodeError> for ErrorCause {
     fn from(err: base64::DecodeError) -> Self {
         Self::Base64Decode(err)
+    }
+}
+
+impl From<libvips::Error> for ErrorCause {
+    fn from(err: libvips::Error) -> Self {
+        Self::Libvips(err)
     }
 }
 
