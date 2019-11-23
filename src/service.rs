@@ -1,5 +1,11 @@
 use super::libvips;
+use std::io::ErrorKind::NotFound as IONotFound;
+use std::path::Path;
 use tokio::{fs::File, prelude::*};
+
+lazy_static! {
+    static ref IMG_FOLDER: String = std::env::var("IMG_FOLDER").unwrap_or_default();
+}
 
 pub(crate) struct Image {
     pub(crate) filename: String,
@@ -39,6 +45,23 @@ impl Image {
         Ok(Self::new(filename, bytes))
     }
 
+    pub(crate) async fn from_storage(filename: String) -> Result<Self, Error> {
+        let path = Path::new(IMG_FOLDER.as_str()).join(&filename);
+        let mut data = Vec::new();
+
+        let mut file = File::open(path)
+            .await
+            .map_err(|e| Error::map_io(e, IONotFound, ErrorKind::NotFound))
+            .context("open file")?;
+
+        file.read_to_end(&mut data)
+            .await
+            .or_internal_err()
+            .context("read file")?;
+
+        Ok(Image::new(filename, data))
+    }
+
     pub(crate) async fn into_thumbnail(self) -> Result<Self, Error> {
         let data = self.data;
         let res = tokio_executor::blocking::run(|| libvips::thumbnail(data))
@@ -49,7 +72,8 @@ impl Image {
     }
 
     pub(crate) async fn save(&self) -> Result<(), Error> {
-        let mut file = File::create(&self.filename)
+        let path = Path::new(IMG_FOLDER.as_str()).join(&self.filename);
+        let mut file = File::create(path)
             .await
             .or_internal_err()
             .context("create file")?;
@@ -99,6 +123,14 @@ impl Error {
         self.backtrace = format!("{}: {}", ctx, self.backtrace);
         self
     }
+
+    fn map_io(err: std::io::Error, io_kind: std::io::ErrorKind, kind: ErrorKind) -> Self {
+        if err.kind() == io_kind {
+            return Error::new(kind, err);
+        };
+
+        Error::new(ErrorKind::Internal, err)
+    }
 }
 
 pub(crate) struct InvalidArgumentError {
@@ -135,6 +167,7 @@ impl std::fmt::Display for ErrorCause {
 
 pub(crate) enum ErrorKind {
     InvalidArgument(InvalidArgumentError),
+    NotFound,
     Internal,
 }
 

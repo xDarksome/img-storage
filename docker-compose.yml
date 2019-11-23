@@ -1,0 +1,11 @@
+version: '3'
+services:
+  img-storage:
+    build: .
+    ports:
+    - "3000:3000"
+    volumes:
+    - images:/mnt/images
+volumes:
+  images:
+    driver: local

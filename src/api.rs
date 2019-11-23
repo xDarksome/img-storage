@@ -3,8 +3,13 @@ use futures::stream::TryStreamExt;
 use hyper::http::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use hyper::{Body, Method, Request, Response, StatusCode};
 use multipart_async::server::Multipart;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::error::Error as StdError;
+
+lazy_static! {
+    static ref GET_IMG: Regex = Regex::new(r"^/images/[^/]+$").expect("regexp");
+}
 
 pub(crate) async fn svc(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     let uri = req.uri().clone();
@@ -20,6 +25,7 @@ pub(crate) async fn svc(req: Request<Body>) -> Result<Response<Body>, hyper::Err
 async fn route(req: Request<Body>) -> Result<Response<Body>, Error> {
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/images") => store_img(req).await,
+        _ if GET_IMG.is_match(req.uri().path()) => get_img(req).await,
         _ => Err(Error::not_found("unknown route".to_string())),
     }
 }
@@ -123,6 +129,16 @@ async fn store_img(req: Request<Body>) -> Result<Response<Body>, Error> {
         .context("build response")?)
 }
 
+async fn get_img(req: Request<Body>) -> Result<Response<Body>, Error> {
+    let filename = req.uri().path().trim_start_matches("/images/");
+    let img = service::Image::from_storage(filename.to_string()).await?;
+    Response::builder()
+        .header("Content-Type", "image/jpeg")
+        .body(Body::from(img.data))
+        .or_internal_err()
+        .context("build response")
+}
+
 fn get_content_type(headers: &HeaderMap<HeaderValue>) -> &str {
     headers
         .get(CONTENT_TYPE)
@@ -148,7 +164,7 @@ struct ErrorResponseBody {
 
 impl ErrorResponseBody {
     fn from_error(mut err: Error) -> Self {
-        if err.code.is_server_error() {
+        if err.code.is_server_error() || err.cause.is_empty() {
             err.cause = err.code.canonical_reason().unwrap_or_default().to_string()
         }
 
@@ -229,6 +245,7 @@ impl From<service::Error> for Error {
                 Self::bad_request(format!("{}: {}", err.arg_name, err.details))
             }
             service::ErrorKind::Internal => Self::internal(format!("{}", err.cause)),
+            service::ErrorKind::NotFound => Self::not_found(String::default()),
         }
         .context(&err.backtrace)
     }
