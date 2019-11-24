@@ -43,13 +43,3 @@ impl std::fmt::Display for Error {
         write!(f, "{}", self.0)
     }
 }
-
-/*#[test]
-fn test_thumbnail() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let img = std::fs::read(root.join("tests/data/img.png")).expect("read img");
-    let img_thumb = std::fs::read(root.join("tests/data/img_thumb.jpeg")).expect("read img_thumb");
-
-    let res = thumbnail(img).expect("make thumbnail");
-    assert_eq!(res, img_thumb);
-}*/
