@@ -5,10 +5,13 @@ use hyper::{Body, Method, Request, Response, StatusCode};
 use multipart_async::server::Multipart;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::error::Error as StdError;
+use std::path::Path;
 
 lazy_static! {
     static ref GET_IMG: Regex = Regex::new(r"^/images/[^/]+$").expect("regexp");
+    static ref IMG_FOLDER: String = env::var("IMG_FOLDER").unwrap_or("images".to_string());
 }
 
 pub(crate) async fn svc(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
@@ -57,7 +60,7 @@ impl ImageRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-struct StoreImgRequestBody(Vec<ImageRequest>);
+pub(crate) struct StoreImgRequestBody(pub(crate) Vec<ImageRequest>);
 
 impl StoreImgRequestBody {
     async fn from_json_request(req: Request<Body>) -> Result<Self, Error> {
@@ -83,19 +86,19 @@ impl StoreImgRequestBody {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct ImageResponse {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ImageResponse {
     filename: String,
 }
 
 impl ImageResponse {
-    fn new(filename: String) -> Self {
+    pub(crate) fn new(filename: String) -> Self {
         ImageResponse { filename: filename }
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct StoreImgResponseBody(Vec<ImageResponse>);
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub(crate) struct StoreImgResponseBody(pub(crate) Vec<ImageResponse>);
 
 impl StoreImgResponseBody {
     fn into_response(self) -> Result<Response<Body>, Error> {
@@ -116,11 +119,12 @@ async fn store_img(req: Request<Body>) -> Result<Response<Body>, Error> {
     }
     .context("parse request body")?;
 
+    let path = Path::new(IMG_FOLDER.as_str());
     let mut res = Vec::new();
     for img_req in req_body.0 {
         let img = img_req.into_image().await.context("load image")?;
         let thumb = img.into_thumbnail().await.context("thumbnail img")?;
-        thumb.save().await.context("save thumbnail")?;
+        thumb.save(path).await.context("save thumbnail")?;
         res.push(ImageResponse::new(thumb.filename));
     }
 
@@ -130,8 +134,9 @@ async fn store_img(req: Request<Body>) -> Result<Response<Body>, Error> {
 }
 
 async fn get_img(req: Request<Body>) -> Result<Response<Body>, Error> {
-    let filename = req.uri().path().trim_start_matches("/images/");
-    let img = service::Image::from_storage(filename.to_string()).await?;
+    let folder = Path::new(IMG_FOLDER.as_str());
+    let filename = req.uri().path().trim_start_matches("/images/").to_string();
+    let img = service::Image::from_storage(filename, folder).await?;
     Response::builder()
         .header("Content-Type", "image/jpeg")
         .body(Body::from(img.data))

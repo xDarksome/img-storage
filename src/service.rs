@@ -3,10 +3,6 @@ use std::io::ErrorKind::NotFound as IONotFound;
 use std::path::Path;
 use tokio::{fs::File, prelude::*};
 
-lazy_static! {
-    static ref IMG_FOLDER: String = std::env::var("IMG_FOLDER").unwrap_or_default();
-}
-
 pub(crate) struct Image {
     pub(crate) filename: String,
     pub(crate) data: Vec<u8>,
@@ -45,11 +41,10 @@ impl Image {
         Ok(Self::new(filename, bytes))
     }
 
-    pub(crate) async fn from_storage(filename: String) -> Result<Self, Error> {
-        let path = Path::new(IMG_FOLDER.as_str()).join(&filename);
+    pub(crate) async fn from_storage(filename: String, folder: &Path) -> Result<Self, Error> {
         let mut data = Vec::new();
 
-        let mut file = File::open(path)
+        let mut file = File::open(folder.join(&filename))
             .await
             .map_err(|e| Error::map_io(e, IONotFound, ErrorKind::NotFound))
             .context("open file")?;
@@ -71,9 +66,8 @@ impl Image {
         Ok(Image::new(self.filename, res))
     }
 
-    pub(crate) async fn save(&self) -> Result<(), Error> {
-        let path = Path::new(IMG_FOLDER.as_str()).join(&self.filename);
-        let mut file = File::create(path)
+    pub(crate) async fn save(&self, path: &Path) -> Result<(), Error> {
+        let mut file = File::create(path.join(&self.filename))
             .await
             .or_internal_err()
             .context("create file")?;
@@ -87,6 +81,7 @@ impl Image {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Error {
     pub(crate) kind: ErrorKind,
     pub(crate) cause: ErrorCause,
@@ -133,6 +128,7 @@ impl Error {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct InvalidArgumentError {
     pub(crate) arg_name: String,
     pub(crate) details: String,
@@ -147,6 +143,7 @@ impl InvalidArgumentError {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ErrorCause {
     IO(std::io::Error),
     Reqwest(reqwest::Error),
@@ -165,6 +162,7 @@ impl std::fmt::Display for ErrorCause {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ErrorKind {
     InvalidArgument(InvalidArgumentError),
     NotFound,

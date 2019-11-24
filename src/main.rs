@@ -1,6 +1,7 @@
 mod api;
 mod libvips;
 mod service;
+mod tests;
 
 #[macro_use]
 extern crate log;
